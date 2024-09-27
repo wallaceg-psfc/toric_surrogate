@@ -23,7 +23,10 @@ nu_n = density profile peaking factor, training range = 1.15 to 1.65
 
 B0 = toroidal magnetic field on axis in T, training range = 11.5 to 12.5
 
+Other equilibrium features are fixed at delta = 0.54, kappa = 1.97, double null configuration, and nu = 0.1.  Analytic equilibrium documentation in Guazzotto, L., and J. P. Freidberg. "Simple, general, realistic, robust, analytic tokamak equilibria. Part 1. Limiter and divertor tokamaks." Journal of Plasma Physics 87.3 (2021): 905870303.
+
+Toroidal mode number = 44 corresponding to launched k|| = 18.1 m-1.  Upper and lower antennas located at z_upper = 0.20805, R_upper = 2.4205, z_lower = -0.2137, R_lower = 2.4197 m.
 
 Output power deposition profiles are for He3 minority species, 2nd harmonic T, and electron heating.  For integrated modeling purposes the most straightforward way to implement is to use a Stix distribution to estimate the "temperature" of the He3 tail.  When the tail temperature is below the critical temperature, He3 power goes to the ions, and when the tail temperature is above the critical temperature it goes to electrons.  2nd harmonic T and electron power deposition profiles can be treated as going directly to bulk T and electrons, respectively.
 
-More details to be added to this README file as additional models get uploaded...  -20240924 GMW
+More details to be added to this README file as additional models get uploaded...  -20240927 GMW
