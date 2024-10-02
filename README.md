@@ -21,7 +21,7 @@ nu_T = temperature profile peaking factor, training range = 2 to 3
 
 nu_n = density profile peaking factor, training range = 1.15 to 1.65
 
-B0 = toroidal magnetic field on axis in T, training range = 11.5 to 12.5
+B0 = toroidal magnetic field on axis in T, training range = 11.8 to 12.5
 
 Other equilibrium features are fixed at delta = 0.54, kappa = 1.97, double null configuration, and nu = 0.1.  Analytic equilibrium documentation in Guazzotto, L., and J. P. Freidberg. "Simple, general, realistic, robust, analytic tokamak equilibria. Part 1. Limiter and divertor tokamaks." Journal of Plasma Physics 87.3 (2021): 905870303.
 
