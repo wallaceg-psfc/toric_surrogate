@@ -42,7 +42,7 @@ def extract_model_weights_for_torax(scaler, *, mlp_he3, mlp_t, mlp_e, pca_he3,
         'hidden_sizes': list(mlp_he3.intercepts_[0].shape),
         'He3': model_to_params(scaler, mlp_he3, pca_he3),
         '2T': model_to_params(scaler, mlp_t, pca_t),
-        'E': model_to_params(scaler, mlp_e, pca_e),
+        'e': model_to_params(scaler, mlp_e, pca_e),
     }
     return params
 
