@@ -1,13 +1,13 @@
 # toric_surrogate
 Surrogate model for TORIC
 
-This repo contains information relating to the surrogate model for TORIC.  The initial MLP + PCA surrogate model for TORIC on SPARC is contained within TORIC_MLP_v1.  This assumes a 50:50 DT ratio for discharges anticipated in the early Q > 1 L-mode campaign.  Input features:
+This repo contains information relating to the surrogate model for TORIC.  The initial MLP + PCA surrogate model for TORIC on SPARC is contained within TORIC_MLP_v1.  This assumes a 50:50 DT ratio for discharges anticipated in the early Q > 1 L-mode campaign.  The toric_surrogate_PRD_v2 branch adds DT ratio as an input parameter and adjusts the ranges for some parameters to include the PRD H-mode scenarios as well.  Input features:
 
 freq = ICRF wave frequency in MHz, training range = 119 to 121
 
-T_avol = volume average temperature in keV, training range = 1.5 to 8.5
+T_avol = volume average temperature in keV, training range = 1.5 to 8.5 (v1); training range = 8.2±3.5 (v2)
 
-n_avol = volume average density in 10^20 m^-3, training range = 1.1 to 5.1
+n_avol = volume average density in 10^20 m^-3, training range = 1.1 to 5.1 (v1); training range = 3.1±2.0 (v2)
 
 min_conc = He3 minority concentration relative to the electron density in %, training range = 1 to 5
 
@@ -24,9 +24,11 @@ Note that this assumes that the inner and outer gaps do not vary as a function o
 
 z0 = vertical position of magnetic axis in m, training range = -0.05 to 0.05
 
-nu_T = temperature profile peaking factor, training range = 2 to 3
+nu_T = temperature profile peaking factor, training range = 2 to 3 (v1); training range = 2.7±0.5 (v2)
 
-nu_n = density profile peaking factor, training range = 1.15 to 1.65
+nu_n = density profile peaking factor, training range = 1.15 to 1.65 (v1); training range = 1.3±0.25 (v2)
+
+DT_ratio = ratio of D/(D+T), training range = 0.5±0.5 (v2 only)
 
 Realistic functional forms for T and n for TORIC-NN	(v.0.3) by P. Rodriguez-Fernandez 2020
 
@@ -63,4 +65,4 @@ Toroidal mode number = 44 corresponding to launched k|| = 18.1 m-1.  Upper and l
 
 Output power deposition profiles are for He3 minority species, 2nd harmonic T, and electron heating.  For integrated modeling purposes the most straightforward way to implement is to use a Stix distribution to estimate the "temperature" of the He3 tail.  When the tail temperature is below the critical temperature, He3 power goes to the ions, and when the tail temperature is above the critical temperature it goes to electrons.  2nd harmonic T and electron power deposition profiles can be treated as going directly to bulk T and electrons, respectively.
 
-More details to be added to this README file as additional models get uploaded...  -20240930 GMW
+More details to be added to this README file as additional models get uploaded...  -20250825 GMW
