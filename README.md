@@ -1,7 +1,7 @@
 # toric_surrogate
 Surrogate model for TORIC
 
-This repo contains information relating to the surrogate model for TORIC.  The initial MLP + PCA surrogate model for TORIC on SPARC is contained within TORIC_MLP_v1.  This assumes a 50:50 DT ratio for discharges anticipated in the early Q > 1 L-mode campaign.  The toric_surrogate_PRD_v2 branch adds DT ratio as an input parameter and adjusts the ranges for some parameters to include the PRD H-mode scenarios as well.  Input features:
+This repo contains information relating to the surrogate model for TORIC.  The initial MLP + PCA surrogate model for TORIC on SPARC is contained within TORIC_MLP_v1.  This assumes a 50:50 DT ratio for discharges anticipated in the early Q > 1 campaign.  The toric_surrogate_PRD_v2 branch adds DT ratio as an input parameter and adjusts the ranges for density and temperature profiles.  Input features:
 
 freq = ICRF wave frequency in MHz, training range = 119 to 121
 
@@ -101,7 +101,7 @@ DT_ratio = ratio of D/(D+T), training range = 0.5±0.5
 
 Realistic functional forms for T and n for TORIC-NN (v.0.3) by P. Rodriguez-Fernandez 2020.
 
-This release extends the TORIC surrogate model for SPARC to the Primary Reference Discharge (PRD) H-mode scenario. The model is very similar to the QGT1LMode model but with density and temperature profile parameters consistent with the PRD. The other significant change is the addition of the D/(D+T) ratio as an input parameter.
+This release extends the TORIC surrogate model for SPARC to the Primary Reference Discharge (PRD) scenario. The model is very similar to the QGT1 model but with density and temperature profile parameters consistent with the PRD. The other significant change is the addition of the D/(D+T) ratio as an input parameter.
 
 Description of the files in this release:
 TORIC_MLP_PCA_PW*.lzma and TORIC_MLP_PCA_Pw*.pkl contain the principal component analysis (PCA) for the species indicated by the '*'. Here the species are 2T (2nd harmonic tritium), He3 (Helium-3), and E (electrons). The PCA inverse transform is used to convert the principal components predicted by the neural network into radial profiles.
