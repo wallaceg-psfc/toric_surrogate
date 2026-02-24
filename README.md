@@ -3,7 +3,7 @@ Surrogate model for TORIC
 
 This repo contains information relating to the surrogate model for TORIC.  The initial MLP + PCA surrogate model for TORIC on SPARC is contained within TORIC_MLP_v1.  This assumes a 50:50 DT ratio for discharges anticipated in the early Q > 1 campaign.  The toric_surrogate_PRD_v2 branch adds DT ratio as an input parameter and adjusts the ranges for density and temperature profiles.  Input features:
 
-freq = ICRF wave frequency in MHz, training range = 119 to 121
+freq = ICRF wave frequency in Hz, training range = 119e6 to 121e6
 
 T_avol = volume average temperature in keV, training range = 1.5 to 8.5 (v1); training range = 8.2±3.5 (v2)
 
