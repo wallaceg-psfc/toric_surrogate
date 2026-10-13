@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toric_surrogate"
+version = "0.1.0"
+description = "Surrogate model for the TORIC ion-cyclotron resonance heating solver."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "chex",
+    "flax",
+    "jax",
+    "jaxtyping",
+    "numpy",
+    "pydantic>=2.0",
+    "torax",
+]
+
+[project.optional-dependencies]
+dev = [
+    "absl-py",
+    "pytest",
+]
+
+[tool.setuptools]
+packages = [
+    "toric_surrogate",
+    "toric_surrogate.TORIC_MLP_v1",
+    "toric_surrogate.TORIC_MLP_v1.tests",
+]
+include-package-data = true
+
+[tool.setuptools.package-dir]
+"toric_surrogate" = "."
+"toric_surrogate.TORIC_MLP_v1" = "TORIC_MLP_v1"
+"toric_surrogate.TORIC_MLP_v1.tests" = "TORIC_MLP_v1/tests"
+
+[tool.setuptools.package-data]
+"toric_surrogate.TORIC_MLP_v1" = ["*.json"]
+"toric_surrogate.TORIC_MLP_v1.tests" = ["data/*.npy"]
