@@ -3,6 +3,7 @@
 import dataclasses
 import json
 import pathlib
+from typing import Any
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -12,39 +13,25 @@ import numpy as np
 import pydantic
 import torax
 from torax import sources as torax_sources
-from torax._src.config import build_runtime_params
-from torax._src.core_profiles import initialization
-from torax._src.physics import fast_ion as fast_ion_lib
-from torax._src.sources.ion_cyclotron_source import base as icrh_base
-from torax._src.sources.tests import test_lib
-from torax._src.test_utils import default_configs
-from torax._src.torax_pydantic import interpolated_param_2d
-from torax._src.torax_pydantic import torax_pydantic
+from torax.experimental import fast_ion as fast_ion_lib
 from toric_surrogate.TORIC_MLP_v1 import torax_interface
 from toric_surrogate.TORIC_MLP_v1 import toric_nn as toric_nn_lib
 
-# Index of He3 in _FAST_ION_SPECIES.
-_HE3_INDEX = 3
 
-
-class ToricNNTest(test_lib.SourceTestCase):
+class ToricNNTest(parameterized.TestCase):
   """Test cases for the ToricNN ICRH model and TORAX interface."""
-
-  source_name = icrh_base.IonCyclotronSource.SOURCE_NAME
-  source_config_class = torax_interface.ToricNNIonCyclotronSourceConfig
 
   @classmethod
   def setUpClass(cls):
     super().setUpClass()
-    torax_sources.register_source_model_config(
-        torax_interface.ToricNNIonCyclotronSourceConfig,
-        icrh_base.IonCyclotronSource.SOURCE_NAME,
+    torax_sources.register_source_config(
+        torax_interface.ToricNNIonCyclotronSourceConfig
     )
 
   def setUp(self):
     super().setUp()
     # pylint: disable=protected-access
-    torax_interface._icrh_model_func_with_toric_nn.cache_clear()
+    torax_interface._load_toric_nn.cache_clear()
     # pylint: enable=protected-access
     self._dummy_model_path = self.create_tempfile('toricnn.json').full_path
     toric_nn = toric_nn_lib.ToricNN(
@@ -94,18 +81,56 @@ class ToricNNTest(test_lib.SourceTestCase):
       json.dump(config, f, indent=4, separators=(',', ':'))
     self.dummy_input = model_input
     self.dummy_output = model_output
-    self._source_name = icrh_base.IonCyclotronSource.SOURCE_NAME
+    self._source_name = torax_interface.ToricNNIonCyclotronSource.SOURCE_ID
+
+  def _get_default_config_dict(
+      self, minority_concentration: float = 0.03
+  ) -> dict[str, Any]:
+    return {
+        'profile_conditions': {
+            'I_p': 15e6,
+            'I_p_source': 'profile_conditions',
+            'psi_source': 'j',
+        },
+        'plasma_composition': {
+            'main_ion': {'D': 0.5, 'T': 0.5},
+            'impurity': {
+                'impurity_mode': 'n_e_ratios',
+                'species': {'He3': minority_concentration},
+            },
+        },
+        'numerics': {},
+        'geometry': {'model_name': 'circular', 'n_rho': 4},
+        'sources': {},
+        'solver': {},
+        'transport': {},
+        'pedestal': {},
+    }
+
+  def _make_initial_inputs(
+      self, torax_config: torax.ToraxConfig
+  ) -> tuple[torax.CoreProfiles, torax.RuntimeParams, torax.Geometry]:
+    step_fn = torax.experimental.make_step_fn(torax_config)
+    state, _ = torax.experimental.get_initial_state_and_post_processed_outputs(
+        step_fn
+    )
+    runtime_params = step_fn.runtime_params_provider(
+        t=torax_config.time_step_calculator.t_initial
+    )
+    return state.core_profiles, runtime_params, state.geometry
 
   def test_build_runtime_params(self):
-    source = torax_interface.ToricNNIonCyclotronSourceConfig.from_dict(
-        {'model_path': self._dummy_model_path}
-    )
+    config = self._get_default_config_dict()
+    config['sources'] = {
+        self._source_name: {
+            'model_name': 'toric_nn',
+            'model_path': self._dummy_model_path,
+        }
+    }
+    torax_config = torax.ToraxConfig.from_dict(config)
+    source = torax_config.sources.icrh
     self.assertIsInstance(
         source, torax_interface.ToricNNIonCyclotronSourceConfig
-    )
-    face_centers = interpolated_param_2d.get_face_centers(nx=4)
-    torax_pydantic.set_grid(
-        source, torax_pydantic.Grid1D(face_centers=face_centers)
     )
     runtime_params = source.build_runtime_params(t=0.0)
     self.assertIsInstance(runtime_params, torax_sources.RuntimeParams)
@@ -121,15 +146,19 @@ class ToricNNTest(test_lib.SourceTestCase):
   def test_runtime_params_builds_dynamic_params(
       self, mode: torax_sources.Mode, is_explicit: bool
   ):
-    source_config = torax_interface.ToricNNIonCyclotronSourceConfig.from_dict({
-        'mode': mode,
-        'is_explicit': is_explicit,
-        'model_path': self._dummy_model_path,
-    })
-    face_centers = interpolated_param_2d.get_face_centers(nx=4)
-    torax_pydantic.set_grid(
-        source_config,
-        torax_pydantic.Grid1D(face_centers=face_centers),
+    config = self._get_default_config_dict()
+    config['sources'] = {
+        self._source_name: {
+            'model_name': 'toric_nn',
+            'mode': mode,
+            'is_explicit': is_explicit,
+            'model_path': self._dummy_model_path,
+        }
+    }
+    torax_config = torax.ToraxConfig.from_dict(config)
+    source_config = torax_config.sources.icrh
+    self.assertIsInstance(
+        source_config, torax_interface.ToricNNIonCyclotronSourceConfig
     )
     dynamic_params = source_config.build_runtime_params(t=0.0)
     self.assertIsInstance(dynamic_params, torax_sources.RuntimeParams)
@@ -141,12 +170,12 @@ class ToricNNTest(test_lib.SourceTestCase):
         model_path='/tmp/non_existent_file.json'
     )
     with self.assertRaises(FileNotFoundError):
-      _ = config.model_func
+      _ = config.build_source()
 
   @parameterized.product(
       total_power=[1e6, 20e6, 120e6],
       frequency=[119e6, 120e6, 121e6],
-      minority_concentration=[1, 2, 3, 4, 5],
+      minority_concentration=[0.01, 0.02, 0.03, 0.04, 0.05],
   )
   def test_icrh_output_matches_total_power(
       self,
@@ -155,13 +184,14 @@ class ToricNNTest(test_lib.SourceTestCase):
       minority_concentration: float,
   ):
     """Tests source outputs match total heating power."""
-    config = default_configs.get_default_config_dict()
+    config = self._get_default_config_dict(
+        minority_concentration=minority_concentration
+    )
     config['sources'] = {
         self._source_name: {
             'model_name': 'toric_nn',
             'P_total': total_power,
             'frequency': frequency,
-            'minority_concentration': minority_concentration,
         }
     }
     torax_config = torax.ToraxConfig.from_dict(config)
@@ -170,29 +200,18 @@ class ToricNNTest(test_lib.SourceTestCase):
         torax_interface.ToricNNIonCyclotronSourceConfig,
     )
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    icrh_source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(t=0.0)
-    geo = torax_config.geometry.build_provider(t=0.0)
-    core_profiles = initialization.initial_core_profiles(
-        runtime_params=runtime_params,
-        geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
-    )
-    icrh_output = icrh_source.get_value(
+    icrh_source = source_models.standard_sources[self._source_name]
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
+    icrh_output, _ = icrh_source.get_value(
         runtime_params,
         geo,
         core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
+        source_state=icrh_source.initial_state(runtime_params),
     )
-    ion_el_total = icrh_output[0] + icrh_output[1]  # pyrefly: ignore[unsupported-operation]
-    integrated_power = jnp.sum(ion_el_total * geo.vpr * geo.drho_norm)  # pyrefly: ignore[bad-argument-type]
+    assert icrh_output.power_density_i is not None
+    assert icrh_output.power_density_e is not None
+    ion_el_total = icrh_output.power_density_i + icrh_output.power_density_e
+    integrated_power = jnp.sum(ion_el_total * geo.vpr * geo.drho_norm)
 
     np.testing.assert_allclose(
         integrated_power,
@@ -269,7 +288,7 @@ class ToricNNTest(test_lib.SourceTestCase):
 
   def test_source_value(self):
     """Tests that the registered source can provide a value."""
-    config = default_configs.get_default_config_dict()
+    config = self._get_default_config_dict()
     config['sources'] = {
         self._source_name: {
             'model_name': 'toric_nn',
@@ -282,91 +301,53 @@ class ToricNNTest(test_lib.SourceTestCase):
         torax_interface.ToricNNIonCyclotronSourceConfig,
     )
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
+    source = source_models.standard_sources[self._source_name]
     self.assertIsInstance(source, torax_sources.Source)
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(
-        t=torax_config.numerics.t_initial,
-    )
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
-    core_profiles = initialization.initial_core_profiles(
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
+    icrh_out, _ = source.get_value(
         runtime_params=runtime_params,
         geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params),
     )
-    icrh_out = source.get_value(
-        runtime_params=runtime_params,
-        geo=geo,
-        core_profiles=core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
-    )
-    self.assertLen(icrh_out, 3)
-    self.assertEqual(icrh_out[0].shape, geo.rho.shape)  # pyrefly: ignore[missing-attribute]
-    self.assertEqual(icrh_out[1].shape, geo.rho.shape)  # pyrefly: ignore[missing-attribute]
+    assert icrh_out.power_density_i is not None
+    assert icrh_out.power_density_e is not None
+    self.assertEqual(icrh_out.power_density_i.shape, geo.rho.shape)
+    self.assertEqual(icrh_out.power_density_e.shape, geo.rho.shape)
 
   def test_source_with_minority_species_from_composition(self):
     """Tests ICRH source with minority_species reading from composition."""
-    config = default_configs.get_default_config_dict()
-    config['plasma_composition'] = {
-        'main_ion': {'D': 0.5, 'T': 0.5},
-        'impurity': {
-            'impurity_mode': 'n_e_ratios',
-            'species': {'He3': 0.03},
-        },
-    }
+    config = self._get_default_config_dict()
     config['sources'] = {
         self._source_name: {
             'model_name': 'toric_nn',
             'model_path': self._dummy_model_path,
             'minority_species': 'He3',
-            'minority_concentration': 0.01,
         }
     }
     torax_config = torax.ToraxConfig.from_dict(config)
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
+    source = source_models.standard_sources[self._source_name]
     self.assertIsInstance(source, torax_sources.Source)
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(
-        t=torax_config.numerics.t_initial,
-    )
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
-    core_profiles = initialization.initial_core_profiles(
-        runtime_params=runtime_params,
-        geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
-    )
-    icrh_params = runtime_params.sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
+    icrh_params = runtime_params.sources[self._source_name]
     self.assertIsInstance(icrh_params, torax_interface.RuntimeParams)
     self.assertEqual(icrh_params.minority_species, 'He3')
     self.assertIn('He3', runtime_params.plasma_composition.impurity_names)
-    icrh_out = source.get_value(
+    icrh_out, _ = source.get_value(
         runtime_params=runtime_params,
         geo=geo,
-        core_profiles=core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params),
     )
-    self.assertLen(icrh_out, 3)
-    self.assertEqual(icrh_out[0].shape, geo.rho.shape)  # pyrefly: ignore[missing-attribute]
-    self.assertEqual(icrh_out[1].shape, geo.rho.shape)  # pyrefly: ignore[missing-attribute]
+    assert icrh_out.power_density_i is not None
+    assert icrh_out.power_density_e is not None
+    self.assertEqual(icrh_out.power_density_i.shape, geo.rho.shape)
+    self.assertEqual(icrh_out.power_density_e.shape, geo.rho.shape)
 
   def test_source_with_minority_species_main_ion(self):
     """Tests ICRH source with minority_species as a main ion."""
-    config = default_configs.get_default_config_dict()
+    config = self._get_default_config_dict()
     config['plasma_composition'] = {
         'main_ion': {
             'D': 0.47,
@@ -387,44 +368,29 @@ class ToricNNTest(test_lib.SourceTestCase):
     }
     torax_config = torax.ToraxConfig.from_dict(config)
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
+    source = source_models.standard_sources[self._source_name]
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
 
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(t=torax_config.numerics.t_initial)
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
-    core_profiles = initialization.initial_core_profiles(
+    icrh_out, _ = source.get_value(
         runtime_params=runtime_params,
         geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params),
     )
 
-    icrh_out = source.get_value(
-        runtime_params=runtime_params,
-        geo=geo,
-        core_profiles=core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
-    )
+    assert icrh_out.power_density_i is not None
+    self.assertEqual(icrh_out.power_density_i.shape, geo.rho.shape)
 
-    self.assertLen(icrh_out, 3)
-    self.assertEqual(icrh_out[0].shape, geo.rho.shape)  # pyrefly: ignore[missing-attribute]
-
-  def test_source_raises_if_minority_species_not_he3(self):
-    """Tests that a ValidationError is raised if minority_species != 'He3'."""
+  def test_invalid_minority_species_raises(self):
     with self.assertRaisesRegex(
         pydantic.ValidationError,
-        "Minority species must be 'He3' if specified",
+        "Input should be 'He3'",
     ):
       torax_interface.ToricNNIonCyclotronSourceConfig(minority_species='D')
 
   def test_source_raises_if_minority_species_not_in_composition(self):
-    """Tests that a ValueError is raised if minority species is missing."""
-    config = default_configs.get_default_config_dict()
+    """Tests that a ValidationError is raised if minority species is missing."""
+    config = self._get_default_config_dict()
     config['plasma_composition'] = {
         'main_ion': {'D': 0.5, 'T': 0.5},
         'impurity': {'impurity_mode': 'n_e_ratios', 'species': {'Ne': 0.01}},
@@ -436,58 +402,14 @@ class ToricNNTest(test_lib.SourceTestCase):
             'minority_species': 'He3',
         }
     }
-    torax_config = torax.ToraxConfig.from_dict(config)
-    source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(t=torax_config.numerics.t_initial)
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
     with self.assertRaisesRegex(
-        ValueError,
-        'Minority species He3 not found in plasma composition',
+        pydantic.ValidationError,
+        'The ICRH source requires "He3" to be present',
     ):
-      core_profiles = initialization.initial_core_profiles(
-          runtime_params=runtime_params,
-          geo=geo,
-          source_models=source_models,
-          neoclassical_models=neoclassical_models,
-      )
-      source.get_value(
-          runtime_params=runtime_params,
-          geo=geo,
-          core_profiles=core_profiles,
-          calculated_source_profiles=None,
-          conductivity=None,
-      )
-
-  def test_minority_concentration_warning_by_default(self):
-    with self.assertLogs(level='WARNING') as cm:
-      torax_interface.ToricNNIonCyclotronSourceConfig()
-    self.assertTrue(
-        any('minority_concentration is provided' in o for o in cm.output)
-    )
-
-  def test_minority_concentration_warning_when_explicitly_set_to_non_none(self):
-    with self.assertLogs(level='WARNING') as cm:
-      torax_interface.ToricNNIonCyclotronSourceConfig(
-          minority_concentration=0.05
-      )
-    self.assertTrue(
-        any('minority_concentration is provided' in o for o in cm.output)
-    )
-
-  def test_minority_concentration_no_warning_when_none(self):
-    with self.assertNoLogs(level='WARNING'):
-      torax_interface.ToricNNIonCyclotronSourceConfig(
-          minority_concentration=None
-      )
+      torax.ToraxConfig.from_dict(config)
 
   def test_icrh_returns_fast_ion_data(self):
-    config = default_configs.get_default_config_dict()
+    config = self._get_default_config_dict()
     config['numerics'] = {'enable_fast_ions': True}
     config['sources'] = {
         self._source_name: {
@@ -498,81 +420,55 @@ class ToricNNTest(test_lib.SourceTestCase):
     }
     torax_config = torax.ToraxConfig.from_dict(config)
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(t=torax_config.numerics.t_initial)
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
-    core_profiles = initialization.initial_core_profiles(
+    source = source_models.standard_sources[self._source_name]
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
+    output, _ = source.get_value(
         runtime_params=runtime_params,
         geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params),
     )
-    output = source.get_value(
-        runtime_params=runtime_params,
-        geo=geo,
-        core_profiles=core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
-    )
-    self.assertLen(output, 3)
-    fast_ion_data = output[2]
+    assert output.power_density_i is not None
+    assert output.power_density_e is not None
+    fast_ion_data = output.fast_ions
     self.assertIsInstance(fast_ion_data, tuple)
-    self.assertLen(fast_ion_data, 5)
-    fi = fast_ion_data[_HE3_INDEX]
+    self.assertLen(fast_ion_data, 1)
+    fi = fast_ion_data[0]
     self.assertIsInstance(fi, fast_ion_lib.FastIon)
     self.assertEqual(fi.species, 'He3')
-    self.assertEqual(fi.source, icrh_base.IonCyclotronSource.SOURCE_NAME)
+    self.assertEqual(fi.source, self._source_name)
     self.assertEqual(fi.n.value.shape, geo.rho.shape)
     self.assertEqual(fi.T.value.shape, geo.rho.shape)
 
   def test_fast_ion_density_conservation(self):
-    config = default_configs.get_default_config_dict()
-    config['numerics'] = {'enable_fast_ions': True}
     minority_conc = 0.03
+    config = self._get_default_config_dict(minority_concentration=minority_conc)
+    config['numerics'] = {'enable_fast_ions': True}
     config['sources'] = {
         self._source_name: {
             'model_name': 'toric_nn',
             'model_path': self._dummy_model_path,
             'P_total': 10e6,
-            'minority_concentration': minority_conc,
         }
     }
     torax_config = torax.ToraxConfig.from_dict(config)
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(t=torax_config.numerics.t_initial)
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
-    core_profiles = initialization.initial_core_profiles(
+    source = source_models.standard_sources[self._source_name]
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
+    output, _ = source.get_value(
         runtime_params=runtime_params,
         geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params),
     )
-    output = source.get_value(
-        runtime_params=runtime_params,
-        geo=geo,
-        core_profiles=core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
-    )
-    fast_ion_data = output[2]
-    n_tail = fast_ion_data[_HE3_INDEX].n.value  # pyrefly: ignore[missing-attribute]
-    n_total = core_profiles.n_e.value * minority_conc
+    fast_ion_data = output.fast_ions
+    n_tail = fast_ion_data[0].n.value
+    n_total = core_profiles.kinetic.n_e.value * minority_conc
     self.assertTrue(jnp.all(n_tail >= 0))
     self.assertTrue(jnp.all(n_tail <= n_total))
 
   def test_fast_ion_tail_temperature_above_electron_temp(self):
-    config = default_configs.get_default_config_dict()
+    config = self._get_default_config_dict()
     config['numerics'] = {'enable_fast_ions': True}
     config['sources'] = {
         self._source_name: {
@@ -583,33 +479,22 @@ class ToricNNTest(test_lib.SourceTestCase):
     }
     torax_config = torax.ToraxConfig.from_dict(config)
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
-        torax_config
-    )(t=torax_config.numerics.t_initial)
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
-    core_profiles = initialization.initial_core_profiles(
+    source = source_models.standard_sources[self._source_name]
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
+    output, _ = source.get_value(
         runtime_params=runtime_params,
         geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params),
     )
-    output = source.get_value(
-        runtime_params=runtime_params,
-        geo=geo,
-        core_profiles=core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
+    fast_ion_data = output.fast_ions
+    temperature_tail = fast_ion_data[0].T.value
+    self.assertTrue(
+        jnp.all(temperature_tail >= core_profiles.kinetic.T_e.value)
     )
-    fast_ion_data = output[2]
-    temperature_tail = fast_ion_data[_HE3_INDEX].T.value  # pyrefly: ignore[missing-attribute]
-    self.assertTrue(jnp.all(temperature_tail >= core_profiles.T_e.value))
 
   def test_zero_power_produces_zero_fast_ions(self):
-    config = default_configs.get_default_config_dict()
+    config = self._get_default_config_dict()
     config['numerics'] = {'enable_fast_ions': True}
     config['sources'] = {
         self._source_name: {
@@ -620,33 +505,79 @@ class ToricNNTest(test_lib.SourceTestCase):
     }
     torax_config = torax.ToraxConfig.from_dict(config)
     source_models = torax_config.sources.build_models()
-    neoclassical_models = torax_config.neoclassical.build_models()
-    source = source_models.standard_sources[
-        icrh_base.IonCyclotronSource.SOURCE_NAME
-    ]
-    runtime_params = build_runtime_params.RuntimeParamsProvider.from_config(
+    source = source_models.standard_sources[self._source_name]
+    core_profiles, runtime_params, geo = self._make_initial_inputs(torax_config)
+    output, _ = source.get_value(
+        runtime_params=runtime_params,
+        geo=geo,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params),
+    )
+    fast_ion_data = output.fast_ions
+    np.testing.assert_allclose(fast_ion_data[0].n.value, 0.0, atol=1e-9)
+    np.testing.assert_allclose(
+        fast_ion_data[0].T.value, core_profiles.kinetic.T_i.value
+    )
+
+  @parameterized.parameters(
+      (20e6, 0.5),
+      (40e6, 0.25),
+  )
+  def test_absorption_fraction_scales_heating_and_fast_ions(
+      self, p_total: float, absorption_fraction: float
+  ):
+    config = self._get_default_config_dict()
+    config['numerics'] = {'enable_fast_ions': True}
+    config['sources'] = {
+        self._source_name: {
+            'model_name': 'toric_nn',
+            'model_path': self._dummy_model_path,
+            'P_total': p_total,
+            'absorption_fraction': absorption_fraction,
+        }
+    }
+    torax_config = torax.ToraxConfig.from_dict(config)
+    source_models = torax_config.sources.build_models()
+    source = source_models.standard_sources[self._source_name]
+    core_profiles, runtime_params_partial, geo = self._make_initial_inputs(
         torax_config
-    )(t=torax_config.numerics.t_initial)
-    geo = torax_config.geometry.build_provider(torax_config.numerics.t_initial)
-    core_profiles = initialization.initial_core_profiles(
-        runtime_params=runtime_params,
+    )
+    output_partial, _ = source.get_value(
+        runtime_params=runtime_params_partial,
         geo=geo,
-        source_models=source_models,
-        neoclassical_models=neoclassical_models,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params_partial),
     )
-    output = source.get_value(
-        runtime_params=runtime_params,
+    source_ion_partial = output_partial.power_density_i
+    source_el_partial = output_partial.power_density_e
+    fast_ions_partial = output_partial.fast_ions
+
+    torax_config.update_fields({
+        f'sources.{self._source_name}.P_total': p_total * absorption_fraction,
+        f'sources.{self._source_name}.absorption_fraction': 1.0,
+    })
+    runtime_params_full = torax.experimental.make_step_fn(
+        torax_config
+    ).runtime_params_provider(t=torax_config.time_step_calculator.t_initial)
+    output_full, _ = source.get_value(
+        runtime_params=runtime_params_full,
         geo=geo,
-        core_profiles=core_profiles,
-        calculated_source_profiles=None,
-        conductivity=None,
+        solver_profiles=core_profiles,
+        source_state=source.initial_state(runtime_params_full),
     )
-    fast_ion_data = output[2]
+    source_ion_full = output_full.power_density_i
+    source_el_full = output_full.power_density_e
+    fast_ions_full = output_full.fast_ions
+
+    np.testing.assert_allclose(source_ion_partial, source_ion_full)
+    np.testing.assert_allclose(source_el_partial, source_el_full)
     np.testing.assert_allclose(
-        fast_ion_data[_HE3_INDEX].n.value, 0.0, atol=1e-9  # pyrefly: ignore[missing-attribute]
+        fast_ions_partial[0].n.value,
+        fast_ions_full[0].n.value,
     )
     np.testing.assert_allclose(
-        fast_ion_data[_HE3_INDEX].T.value, core_profiles.T_i.value  # pyrefly: ignore[missing-attribute]
+        fast_ions_partial[0].T.value,
+        fast_ions_full[0].T.value,
     )
 
 
