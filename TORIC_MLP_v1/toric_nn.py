@@ -12,6 +12,7 @@ import flax.linen as nn
 import jax
 from jax import numpy as jnp
 import jaxtyping as jt
+import numpy as np
 
 # Default path to the bundled TORIC MLP v1 weights and configuration JSON.
 DEFAULT_MODEL_PATH: Final[str] = str(
@@ -61,8 +62,6 @@ class ToricNNInputs:
   density_peaking_factor: jt.Float[jt.Scalar, ''] | float
   # Vacuum toroidal magnetic field at R_major [T].
   # Training range = 11.8 to 12.5.
-  # TODO(b/350494588): double-check with TORIC-NN team on the definition of B_0
-  # used during training.
   B_0: jt.Float[jt.Scalar, ''] | float
 
 
@@ -162,12 +161,6 @@ class ToricNN(nn.Module):
 class ToricNNWrapper:
   """Wrapper for the Toric NN model.
 
-  This wrapper is currently for a SPARC-specific ion cyclotron resonance
-  heating scheme.
-
-  TODO(b/378072116): Make the wrapper more general to work with other ICRH
-  schemes and surrogate models.
-
   This wrapper is the main interface for interacting with the Toric NN model
   for making predictions of heating power deposition profiles given
   `ToricNNInputs`.
@@ -176,15 +169,11 @@ class ToricNNWrapper:
   each simulated output (Helium-3, 2nd-harmonic tritium and electrons).
   """
 
-  def __init__(self, path: str | os.PathLike[str] | None = None):
-    if path is None:
-      path = DEFAULT_MODEL_PATH
+  def __init__(self, path: str | os.PathLike[str] = DEFAULT_MODEL_PATH):
     self._path = str(path)
     logging.info('Loading ToricNN model from %s', self._path)
-    model_config = _from_json(self._path)
-    self.model_config = model_config
+    self.model_config = _from_json(self._path)
 
-    self._params = {}
     self.power_deposition_network = self._load_network()
     self.power_deposition_He3_params = self._load_params(HELIUM3_ID)
     self.power_deposition_2T_params = self._load_params(
@@ -207,23 +196,23 @@ class ToricNNWrapper:
     params['params'] = dict(self.model_config[f'{network_name}'])
     for i in range(len(self.model_config['hidden_sizes']) + 1):
       params['params'][f'Dense_{i}'] = {
-          'kernel': jnp.asarray(
+          'kernel': np.asarray(
               self.model_config[f'{network_name}'][f'Dense_{i}']['kernel']
           ),
-          'bias': jnp.asarray(
+          'bias': np.asarray(
               self.model_config[f'{network_name}'][f'Dense_{i}']['bias']
           ),
       }
-    params['params']['pca_components'] = jnp.asarray(
+    params['params']['pca_components'] = np.asarray(
         self.model_config[f'{network_name}']['pca_components']
     )
-    params['params']['pca_mean'] = jnp.asarray(
+    params['params']['pca_mean'] = np.asarray(
         self.model_config[f'{network_name}']['pca_mean']
     )
-    params['params']['scaler_mean'] = jnp.asarray(
+    params['params']['scaler_mean'] = np.asarray(
         self.model_config[f'{network_name}']['scaler_mean']
     )
-    params['params']['scaler_scale'] = jnp.asarray(
+    params['params']['scaler_scale'] = np.asarray(
         self.model_config[f'{network_name}']['scaler_scale']
     )
     return params
@@ -231,7 +220,7 @@ class ToricNNWrapper:
   def __hash__(self) -> int:
     return hash(self._path)
 
-  def __eq__(self, other: Self) -> bool:  # pyrefly: ignore[bad-override]
+  def __eq__(self, other: Self) -> bool:
     return isinstance(other, ToricNNWrapper) and self._path == other._path
 
 
@@ -271,8 +260,8 @@ def predict(
       toric_nn.power_deposition_e_params, input_array
   )
   return ToricNNOutputs(
-      power_deposition_He3=outputs_He3,  # pyrefly: ignore[bad-argument-type]
-      power_deposition_2T=outputs_2T,  # pyrefly: ignore[bad-argument-type]
-      power_deposition_e=outputs_e,  # pyrefly: ignore[bad-argument-type]
+      power_deposition_He3=outputs_He3,
+      power_deposition_2T=outputs_2T,
+      power_deposition_e=outputs_e,
   )
 
