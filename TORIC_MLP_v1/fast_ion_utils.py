@@ -272,6 +272,20 @@ def bimaxwellian_split(
   )
   n_tail = jnp.clip(n_tail, 0.0, n_total * 0.99)
 
+  # Smoothly suppress thermalized warm tails as xi = (T_tail - T_e) / T_e -> 0.
+  # In the low-power limit with T_e ~ T_i, (T_tail - T_e) = xi * T_e is
+  # proportional to P_density_W, cancelling P_density_W in the power-balance
+  # denominator and leaving a non-zero warm Maxwellian tail (T_tail/T_e ~ 1-3)
+  # that is already thermalized rather than a true fast-ion population.
+  xi = (T_tail - T_e) / T_e
+  xi_norm = jnp.clip((xi - 1.0) / 2.0, 0.0, 1.0)
+  # Cubic Hermite smoothstep u^2 * (3 - 2u): equals 0 for T_tail <= 2*T_e and
+  # 1 for T_tail >= 4*T_e, with zero slope at both ends so gradients remain C^1
+  # smooth across the clip boundaries.
+  warm_tail_taper = xi_norm**2 * (3.0 - 2.0 * xi_norm)
+  n_tail = n_tail * warm_tail_taper
+  T_tail = T_i + warm_tail_taper * (T_tail - T_i)
+
   n_tail = jnp.where(P_density_W <= 1.0e-6, 0.0, n_tail)
   T_tail = jnp.where(P_density_W <= 1.0e-6, T_i, T_tail)
 
