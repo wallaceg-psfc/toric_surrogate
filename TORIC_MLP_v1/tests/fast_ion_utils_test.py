@@ -76,6 +76,14 @@ class FastIonUtilsTest(parameterized.TestCase):
     np.testing.assert_allclose(n_tail, 0.0, atol=1e-9)
     np.testing.assert_allclose(T_tail, self.T_i_val)
 
+  def test_bimaxwellian_split_low_power_warm_tail_suppressed(self):
+    n_tail, T_tail = self._call_bimaxwellian_split(
+        power_deposition=jnp.ones(self.n_rho),
+        P_total_W=5.0e4,  # Gives xi < 1 (T_tail/T_e < 2)
+    )
+    np.testing.assert_allclose(n_tail, 0.0, atol=1e-9)
+    np.testing.assert_allclose(T_tail, self.T_i_val)
+
   def test_bimaxwellian_split_high_power(self):
     """Test with high power to trigger constraints or higher tail fraction."""
 
